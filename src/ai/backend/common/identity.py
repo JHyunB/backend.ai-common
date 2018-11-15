@@ -2,6 +2,7 @@ import json
 import logging
 import os
 import socket
+import subprocess
 import sys
 from pathlib import Path
 
@@ -16,6 +17,7 @@ __all__ = (
     'get_instance_ip',
     'get_instance_type',
     'get_instance_region',
+    'get_instance_scaling_group',
 )
 
 log = logging.getLogger(__name__)
@@ -73,6 +75,7 @@ get_instance_id = None
 get_instance_ip = None
 get_instance_type = None
 get_instance_region = None
+get_instance_scaling_group = None
 
 
 def _define_functions():
@@ -81,6 +84,7 @@ def _define_functions():
     global get_instance_ip
     global get_instance_type
     global get_instance_region
+    global get_instance_scaling_group
     if _defined:
         return
 
@@ -107,6 +111,60 @@ def _define_functions():
                 return 'amazon/unknown'
             region = json.loads(doc)['region']
             return f'amazon/{region}'
+
+        async def _get_instance_scaling_group():
+            # Get tag value of the instance.
+            # Refs: http://priocept.com/2017/02/14/aws-tag-retrieval-from-within-an-ec2-instance/
+            bash_script = '''
+#!/bin/bash
+
+if [ -z $1 ]; then
+    scriptName=`basename "$0"`
+    echo  >&2 "Usage: $scriptName <tag_name>"
+    exit 1
+fi
+
+# check that aws and ec2-metadata commands are installed
+command -v aws >/dev/null 2>&1 || { echo >&2 'aws command not installed.'; exit 2; }
+command -v ec2-metadata >/dev/null 2>&1 || { echo >&2 'ec2-metadata command not installed.'; exit 3; }
+
+# set filter parameters
+instanceId=$(ec2-metadata -i | cut -d ' ' -f2)
+filterParams=( --filters "Name=key,Values=$1" \
+    "Name=resource-type,Values=instance" "Name=resource-id,Values=$instanceId" )
+
+# get region
+region=$(ec2-metadata --availability-zone | cut -d ' ' -f2)
+region=${region%?}
+
+# retrieve tags
+tagValues=$(aws ec2 describe-tags --output text --region "$region" "${filterParams[@]}")
+if [ $? -ne 0 ]; then
+    echo >&2 "Error retrieving tag value."
+    exit 4
+fi
+
+# extract required tag value
+tagValue=$(echo "$tagValues" | cut -f5)
+echo "$tagValue"
+            '''
+            bash_script_path = Path('./retrieve_tag.sh')
+            with open(str(bash_script_path), 'w') as f:
+                f.write(bash_script)
+            p = subprocess.Popen([
+                'sh', './retrieve_tag.sh', 'Scaling_Group'
+            ], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            outs, errs = p.communicate()
+            scaling_group = outs.decode('utf-8')
+            errs = errs.decode('utf-8')
+            if errs:
+                log.error('Initialization error: '
+                          'Cannot find the instance\'s scaling group.')
+                exit(1)
+
+            bash_script_path.unlink()
+
+            return scaling_group
 
     elif current_provider == 'azure':
         # ref: https://docs.microsoft.com/azure/virtual-machines/virtual-machines-instancemetadataservice-overview
@@ -149,6 +207,9 @@ def _define_functions():
             region = o['compute']['location']
             return f'azure/{region}'
 
+        async def _get_instance_scaling_group():
+            return 'default'
+
     elif current_provider == 'google':
         # ref: https://cloud.google.com/compute/docs/storing-retrieving-metadata
         _metadata_prefix = 'http://metadata.google.internal/computeMetadata/v1/'
@@ -175,6 +236,9 @@ def _define_functions():
             region = zone.rsplit('-', 1)[0]
             return f'google/{region}'
 
+        async def _get_instance_scaling_group():
+            return 'default'
+
     else:
         _metadata_prefix = None
 
@@ -196,10 +260,14 @@ def _define_functions():
         async def _get_instance_region():
             return os.environ.get('BACKEND_REGION', 'local/unknown')
 
+        async def _get_instance_scaling_group():
+            return 'default'
+
     get_instance_id = _get_instance_id
     get_instance_ip = _get_instance_ip
     get_instance_type = _get_instance_type
     get_instance_region = _get_instance_region
+    get_instance_scaling_group = _get_instance_scaling_group
     _defined = True
 
 
