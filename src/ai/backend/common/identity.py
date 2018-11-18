@@ -152,10 +152,10 @@ echo "$tagValue"
             with open(str(bash_script_path), 'w') as f:
                 f.write(bash_script)
             p = subprocess.Popen([
-                'sh', './retrieve_tag.sh', 'Scaling_Group'
+                'bash', './retrieve_tag.sh', 'ScalingGroup'
             ], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             outs, errs = p.communicate()
-            scaling_group = outs.decode('utf-8')
+            scaling_group = outs.decode('utf-8').strip()
             errs = errs.decode('utf-8')
             if errs:
                 log.error('Initialization error: '
