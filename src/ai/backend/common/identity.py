@@ -124,17 +124,17 @@ if [ -z $1 ]; then
     exit 1
 fi
 
-# check that aws and ec2-metadata commands are installed
+# check that aws and ec2metadata commands are installed
 command -v aws >/dev/null 2>&1 || { echo >&2 'aws command not installed.'; exit 2; }
-command -v ec2-metadata >/dev/null 2>&1 || { echo >&2 'ec2-metadata command not installed.'; exit 3; }
+command -v ec2metadata >/dev/null 2>&1 || { echo >&2 'ec2metadata command not installed.'; exit 3; }
 
 # set filter parameters
-instanceId=$(ec2-metadata -i | cut -d ' ' -f2)
+instanceId=$(ec2metadata --instance-id | cut -d ' ' -f2)
 filterParams=( --filters "Name=key,Values=$1" \
     "Name=resource-type,Values=instance" "Name=resource-id,Values=$instanceId" )
 
 # get region
-region=$(ec2-metadata --availability-zone | cut -d ' ' -f2)
+region=$(ec2metadata --availability-zone | cut -d ' ' -f2)
 region=${region%?}
 
 # retrieve tags
